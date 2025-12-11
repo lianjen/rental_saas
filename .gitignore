@@ -1,15 +1,18 @@
-<<<<<<< HEAD
+# 🔒 敏感資訊
 .streamlit/secrets.toml
+.env
+.env.local
+
+# Python
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
 .DS_Store
-venv/
-=======
-.streamlit/secrets.toml
-__pycache__/
-*.pyc
-.env
-.DS_Store
-venv/
->>>>>>> ee676488986747e6c2d8ca11c3943d737a2e94a3
+Thumbs.db
