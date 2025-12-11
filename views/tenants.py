@@ -53,7 +53,7 @@ def render(db):
                 lease_start = st.date_input("租約開始日", key="start_add")
             with c4:
                 lease_end = st.date_input("租約到期日", key="end_add")
-                payment_method = st.selectbox("繳款方式", ["月繳", "季繳", "年繳"], key="method_add")
+                payment_method = st.selectbox("繳款方式", ["月繳", "半年繳", "年繳"], key="method_add")
             
             submit = st.form_submit_button("✅ 新增房客", type="primary", use_container_width=True)
             
@@ -65,16 +65,25 @@ def render(db):
                     st.error("❌ 租約開始日必須早於到期日")
                 else:
                     # 新增
-                    ok, msg = db.add_tenant(
-                        room_number, tenant_name, phone, deposit, base_rent,
-                        lease_start, lease_end, payment_method
-                    )
-                    if ok:
-                        st.success(msg)
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    try:
+                        ok, msg = db.add_tenant(
+                            room_number=room_number,
+                            tenant_name=tenant_name,
+                            phone=phone,
+                            deposit=deposit,
+                            base_rent=base_rent,
+                            lease_start=lease_start,
+                            lease_end=lease_end,
+                            payment_method=payment_method
+                        )
+                        if ok:
+                            st.success(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"❌ 新增失敗: {str(e)}")
     
     # === TAB 3: 編輯 ===
     with tab3:
@@ -104,23 +113,31 @@ def render(db):
                 with c4:
                     new_lease_end = st.date_input("租約到期", value=pd.to_datetime(tenant_data['lease_end']).date(), key="end_edit")
                 
+                new_payment_method = st.selectbox("繳款方式", ["月繳", "半年繳", "年繳"], 
+                                                  index=["月繳", "半年繳", "年繳"].index(tenant_data.get('payment_method', '月繳')),
+                                                  key="method_edit")
+                
                 submit = st.form_submit_button("💾 保存編輯", type="primary", use_container_width=True)
                 
                 if submit:
-                    ok, msg = db.update_tenant(
-                        selected_room,
-                        tenant_name=new_tenant_name,
-                        phone=new_phone,
-                        deposit=new_deposit,
-                        base_rent=new_base_rent,
-                        lease_start=new_lease_start,
-                        lease_end=new_lease_end
-                    )
-                    if ok:
-                        st.success(msg)
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    try:
+                        ok, msg = db.update_tenant(
+                            room_number=selected_room,
+                            tenant_name=new_tenant_name,
+                            phone=new_phone,
+                            deposit=new_deposit,
+                            base_rent=new_base_rent,
+                            lease_start=new_lease_start,
+                            lease_end=new_lease_end,
+                            payment_method=new_payment_method
+                        )
+                        if ok:
+                            st.success(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"❌ 編輯失敗: {str(e)}")
         else:
             st.info("📭 沒有房客可編輯")
