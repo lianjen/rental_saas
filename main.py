@@ -35,13 +35,6 @@ def main():
         st.title("🏠 租務管理系統")
         st.divider()
         
-        # 選單選項
-        menu_options = {
-            "📊 儀表板": "dashboard",
-            "👥 房客管理": "tenant",
-            "⚡ 房間抄表": "electricity"
-        }
-        
         # 初始化 session state 中的選單選項
         if 'menu_selection' not in st.session_state:
             st.session_state.menu_selection = "dashboard"
@@ -55,11 +48,11 @@ def main():
                 st.session_state.menu_selection = "dashboard"
                 st.rerun()
         with col2:
-            if st.button("👥 房客管理", use_container_width=True, key="menu_tenant"):
+            if st.button("👥 房客", use_container_width=True, key="menu_tenant"):
                 st.session_state.menu_selection = "tenant"
                 st.rerun()
         with col3:
-            if st.button("⚡ 房間抄表", use_container_width=True, key="menu_electricity"):
+            if st.button("⚡ 抄表", use_container_width=True, key="menu_electricity"):
                 st.session_state.menu_selection = "electricity"
                 st.rerun()
         
