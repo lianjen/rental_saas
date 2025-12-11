@@ -19,6 +19,8 @@ def render(db):
         st.session_state.current_period_id = None
     if 'current_period_info' not in st.session_state:
         st.session_state.current_period_info = None
+    if 'edit_period_id' not in st.session_state:
+        st.session_state.edit_period_id = None
     
     tab1, tab2, tab3 = st.tabs(["📅 計費期間", "📊 抄表輸入", "💡 計費結果"])
     
@@ -27,33 +29,153 @@ def render(db):
         st.subheader("計費期間設定")
         st.markdown("新增或選擇計費期間")
         
-        with st.form("period_form", border=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                year = st.number_input("年度", value=datetime.now().year, min_value=2020, max_value=2100)
-            with c2:
-                month_start = st.number_input("開始月份", value=1, min_value=1, max_value=12)
-            with c3:
-                month_end = st.number_input("結束月份", value=2, min_value=1, max_value=12)
+        # 判斷是否在編輯模式
+        if st.session_state.edit_period_id is None:
+            # 新增模式
+            with st.form("period_form", border=True):
+                st.write("**新增計費期間**")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    year = st.number_input("年度", value=datetime.now().year, min_value=2020, max_value=2100, key="new_year")
+                with c2:
+                    month_start = st.number_input("開始月份", value=1, min_value=1, max_value=12, key="new_month_start")
+                with c3:
+                    month_end = st.number_input("結束月份", value=2, min_value=1, max_value=12, key="new_month_end")
+                
+                c4, c5 = st.columns(2)
+                with c4:
+                    tdy_kwh = st.number_input(
+                        "台電總度數",
+                        min_value=0.0,
+                        value=0.0,
+                        step=0.1,
+                        format="%.2f",
+                        key="new_tdy_kwh"
+                    )
+                with c5:
+                    tdy_fee = st.number_input(
+                        "台電總金額 (NT$)",
+                        min_value=0,
+                        value=0,
+                        step=100,
+                        key="new_tdy_fee"
+                    )
+                
+                submit = st.form_submit_button("✅ 新增計費期間", type="primary", use_container_width=True)
+                
+                if submit:
+                    if month_start > month_end:
+                        st.error("❌ 開始月份不能大於結束月份")
+                    else:
+                        try:
+                            ok, msg, period_id = db.add_electricity_period(year, month_start, month_end)
+                            if ok:
+                                # 保存台電總表
+                                db.add_tdy_bill(period_id, "TDY", tdy_kwh, tdy_fee)
+                                
+                                st.session_state.current_period_id = period_id
+                                st.session_state.current_period_info = f"{year}年 {month_start}月 - {month_end}月"
+                                st.success(f"✅ {msg}")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {msg}")
+                        except Exception as e:
+                            st.error(f"❌ 新增失敗: {str(e)}")
+        
+        else:
+            # 編輯模式
+            period_id = st.session_state.edit_period_id
             
-            submit = st.form_submit_button("✅ 新增計費期間", type="primary", use_container_width=True)
-            
-            if submit:
-                if month_start > month_end:
-                    st.error("❌ 開始月份不能大於結束月份")
-                else:
-                    try:
-                        ok, msg, period_id = db.add_electricity_period(year, month_start, month_end)
-                        if ok:
-                            st.session_state.current_period_id = period_id
-                            st.session_state.current_period_info = f"{year}年 {month_start}月 - {month_end}月"
-                            st.success(f"✅ {msg}")
-                            time.sleep(1)
-                            st.rerun()
+            try:
+                periods = db.get_all_periods()
+                edit_period = None
+                for p in periods:
+                    if p['id'] == period_id:
+                        edit_period = p
+                        break
+                
+                if edit_period:
+                    st.write(f"**編輯計費期間: {edit_period['period_year']}年 {edit_period['period_month_start']}月 - {edit_period['period_month_end']}月**")
+                    
+                    with st.form("period_edit_form", border=True):
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            year = st.number_input(
+                                "年度",
+                                value=edit_period['period_year'],
+                                min_value=2020,
+                                max_value=2100,
+                                key="edit_year"
+                            )
+                        with c2:
+                            month_start = st.number_input(
+                                "開始月份",
+                                value=edit_period['period_month_start'],
+                                min_value=1,
+                                max_value=12,
+                                key="edit_month_start"
+                            )
+                        with c3:
+                            month_end = st.number_input(
+                                "結束月份",
+                                value=edit_period['period_month_end'],
+                                min_value=1,
+                                max_value=12,
+                                key="edit_month_end"
+                            )
+                        
+                        c4, c5 = st.columns(2)
+                        with c4:
+                            tdy_kwh = st.number_input(
+                                "台電總度數",
+                                min_value=0.0,
+                                value=float(edit_period.get('tdy_total_kwh', 0)),
+                                step=0.1,
+                                format="%.2f",
+                                key="edit_tdy_kwh"
+                            )
+                        with c5:
+                            tdy_fee = st.number_input(
+                                "台電總金額 (NT$)",
+                                min_value=0,
+                                value=int(edit_period.get('tdy_total_fee', 0)),
+                                step=100,
+                                key="edit_tdy_fee"
+                            )
+                        
+                        st.markdown("**計算電費單價：**")
+                        if tdy_kwh > 0 and tdy_fee > 0:
+                            unit_price = round(tdy_fee / tdy_kwh, 2)
+                            st.info(f"💡 電費單價 = {tdy_fee} ÷ {tdy_kwh:.2f} = **NT$ {unit_price:.2f}/度**")
                         else:
-                            st.error(f"❌ {msg}")
-                    except Exception as e:
-                        st.error(f"❌ 新增失敗: {str(e)}")
+                            st.warning("⚠️ 請輸入度數和金額以計算單價")
+                        
+                        c6, c7 = st.columns(2)
+                        with c6:
+                            submit = st.form_submit_button("💾 保存編輯", type="primary", use_container_width=True)
+                        with c7:
+                            cancel = st.form_submit_button("❌ 取消編輯", use_container_width=True)
+                        
+                        if submit:
+                            try:
+                                db.add_tdy_bill(period_id, "TDY", tdy_kwh, tdy_fee)
+                                st.success("✅ 計費期間已更新")
+                                time.sleep(1)
+                                st.session_state.edit_period_id = None
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 保存失敗: {str(e)}")
+                        
+                        if cancel:
+                            st.session_state.edit_period_id = None
+                            st.rerun()
+            
+            except Exception as e:
+                st.error(f"❌ 編輯失敗: {str(e)}")
+                if st.button("返回", use_container_width=True):
+                    st.session_state.edit_period_id = None
+                    st.rerun()
         
         st.divider()
         st.subheader("歷史計費期間")
@@ -63,16 +185,26 @@ def render(db):
             if periods:
                 for period in periods:
                     with st.container(border=True):
-                        c1, c2, c3 = st.columns([3, 1, 1])
+                        c1, c2, c3, c4 = st.columns([2, 0.8, 0.8, 0.8])
                         with c1:
                             period_label = f"📅 {period['period_year']}年 {period['period_month_start']}月 - {period['period_month_end']}月"
                             st.write(period_label)
+                            
+                            # 顯示電費單價
+                            if period.get('tdy_total_kwh') and period.get('tdy_total_fee'):
+                                unit_price = round(period['tdy_total_fee'] / period['tdy_total_kwh'], 2)
+                                st.caption(f"電費單價: NT$ {unit_price:.2f}/度")
+                        
                         with c2:
-                            if st.button("選擇", key=f"select_period_{period['id']}", use_container_width=True):
+                            if st.button("✏️ 編輯", key=f"edit_period_{period['id']}", use_container_width=True):
+                                st.session_state.edit_period_id = period['id']
+                                st.rerun()
+                        with c3:
+                            if st.button("📍 選擇", key=f"select_period_{period['id']}", use_container_width=True):
                                 st.session_state.current_period_id = period['id']
                                 st.session_state.current_period_info = period_label
                                 st.rerun()
-                        with c3:
+                        with c4:
                             st.caption(f"ID: {period['id']}")
             else:
                 st.info("📭 還沒有計費期間")
@@ -89,40 +221,8 @@ def render(db):
             # 顯示當前計費期間
             st.info(f"✅ 當前計費期間: {st.session_state.current_period_info}")
             
-            st.markdown("### 第一步: 總表數據 (台電帳單)")
-            
-            with st.form("tdy_form", border=True):
-                c1, c2 = st.columns(2)
-                with c1:
-                    tdy_kwh = st.number_input(
-                        "台電總度數",
-                        min_value=0.0,
-                        value=0.0,
-                        step=0.1,
-                        format="%.2f",
-                        key="tdy_kwh"
-                    )
-                with c2:
-                    tdy_fee = st.number_input(
-                        "台電總金額 (NT$)",
-                        min_value=0,
-                        value=0,
-                        step=100,
-                        key="tdy_fee"
-                    )
-                
-                submit_tdy = st.form_submit_button("✅ 輸入總表", type="primary", use_container_width=True)
-                
-                if submit_tdy:
-                    try:
-                        db.add_tdy_bill(st.session_state.current_period_id, "TDY", tdy_kwh, tdy_fee)
-                        st.success("✅ 台電總表已保存")
-                    except Exception as e:
-                        st.error(f"❌ 保存失敗: {str(e)}")
-            
-            st.divider()
-            st.markdown("### 第二步: 各房間抄表 (上期 → 本期)")
-            st.markdown("**按房號順序輸入**")
+            st.markdown("### 各房間抄表 (上期 → 本期)")
+            st.markdown("**按房號順序輸入 - 本期用量四捨五入到小數第二位**")
             
             with st.form("meter_form", border=True):
                 # 按人性化順序排列 tab
@@ -194,6 +294,9 @@ def render(db):
                 if report_df.empty:
                     st.info("📭 還沒有計費數據，請先完成抄表輸入")
                 else:
+                    # 四捨五入單價到小數點2位數
+                    report_df['單價'] = report_df['單價'].apply(lambda x: round(x, 2))
+                    
                     # 新增「誰繳了電費」欄位
                     report_df['繳費狀態'] = '未繳'  # 預設為未繳
                     
@@ -211,7 +314,7 @@ def render(db):
                             "私表度數": st.column_config.NumberColumn("私表度數", format="%.2f", width=100),
                             "分攤度數": st.column_config.NumberColumn("分攤度數", format="%.2f", width=100),
                             "合計度數": st.column_config.NumberColumn("合計度數", format="%.2f", width=100),
-                            "單價": st.column_config.NumberColumn("單價 ($/度)", format="%.4f", width=100),
+                            "單價": st.column_config.NumberColumn("單價 ($/度)", format="$%.2f", width=100),
                             "應繳電費": st.column_config.NumberColumn("應繳電費 (NT$)", format="$%d", width=120),
                             "繳費狀態": st.column_config.SelectboxColumn("繳費狀態", options=["未繳", "已繳"], width=120)
                         }
