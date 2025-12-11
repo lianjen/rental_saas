@@ -9,7 +9,7 @@ SHARING_ROOMS = ["2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
 
 def render(db):
     st.header("⚡ 電費管理")
-    st.markdown("Taiwan Electricity Fee Calculator v14.1")
+    st.markdown("Taiwan Electricity Fee Calculator v14.2")
     
     # 初始化 session state
     if "current_period_id" not in st.session_state:
@@ -285,7 +285,7 @@ def render(db):
                         st.session_state.calc_state["public_per_room"] = public_per_room
                         st.session_state.calc_state["notes"] = notes
                         
-                        st.success("✅ 計算完成！請切換到「計費結果」查看詳細資訊")
+                        st.success("✅ 計算完成！請查看計費結果")
                         time.sleep(1)
                         st.rerun()
             
@@ -374,28 +374,15 @@ def render(db):
                 with col_btn1:
                     if st.button("💾 儲存計費記錄", type="primary", use_container_width=True):
                         try:
-                            # 儲存到 session state
-                            st.session_state.calc_state["results"] = {
-                                "year": year,
-                                "month": month,
-                                "tdy_kwh": total_kwh,
-                                "tdy_fee": total_fee,
-                                "unit_price": unit_price,
-                                "public_kwh": public_kwh,
-                                "public_per_room": public_per_room,
-                                "results": calc_results,
-                                "notes": notes,
-                                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            }
+                            # 儲存到資料庫
+                            ok, msg = db.save_electricity_record(st.session_state.current_period_id, calc_results)
                             
-                            # 嘗試儲存到資料庫
-                            try:
-                                db.save_electricity_record(st.session_state.calc_state["results"])
-                            except:
-                                pass  # 資料庫方法不存在，忽略
-                            
-                            st.success("✅ 計費記錄已儲存\n\n**儲存位置：** Session State（本機記憶體）\n\n**記錄資訊：**\n- 年月: 2025年9月\n- 台電總度數: 2965.00 kWh\n- 台電總金額: NT$ 7,964\n- 單位電價: NT$ 2.69/kWh\n- 計費房間: 12間\n- 儲存時間: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                            time.sleep(2)
+                            if ok:
+                                st.session_state.calc_state["results"] = calc_results
+                                st.success("✅ 計費記錄已儲存到資料庫\n\n**儲存位置：** Supabase 資料庫 (electricity_payment 表)\n\n切換到「計費結果」Tab 即可查看繳費狀態")
+                                time.sleep(2)
+                            else:
+                                st.error(f"❌ {msg}")
                         except Exception as e:
                             st.error(f"❌ 儲存失敗: {str(e)}")
                 
@@ -408,106 +395,119 @@ def render(db):
                 if notes:
                     st.info(f"📝 備註: {notes}")
     
-    # ===== TAB 3: 計費結果 =====
+    # ===== TAB 3: 計費結果（繳費記錄）=====
     with tab3:
-        st.subheader("📈 計費結果")
+        st.subheader("📈 計費結果與繳費記錄")
         
         if not st.session_state.current_period_id:
             st.warning("⚠️ 請先在「計費期間」選擇或建立一個期間")
         else:
             st.info(f"📌 目前期間: {st.session_state.current_period_info}")
             
-            st.markdown("##### 電費繳款狀態管理")
+            st.markdown("##### 📋 各房間繳費狀態與紀錄")
             st.divider()
             
             try:
-                # 取得計費報告
-                report_df = db.get_period_report(st.session_state.current_period_id)
+                # 取得繳費紀錄
+                payment_df = db.get_electricity_payment_record(st.session_state.current_period_id)
                 
-                if report_df.empty:
-                    st.info("📭 此期間尚無計費資料")
+                if payment_df.empty:
+                    st.info("📭 此期間尚無計費記錄\n\n**請先在「度數輸入與計算」進行計算並儲存**")
                 else:
-                    # 處理數據精度
-                    report_df = report_df.apply(lambda x: round(x, 2) if isinstance(x, (int, float)) else x)
-                    
-                    # 重新命名欄位
-                    report_df = report_df.rename(columns={
-                        'room_number': '房號',
-                        'room_kwh': '房間度數',
-                        'public_kwh': '公用分攤',
-                        'total_kwh': '總度數',
-                        'fee_amount': '應繳金額',
-                        'paid_amount': '已繳金額',
-                        'status': '繳費狀態'
-                    })
-                    
-                    st.markdown("##### 各房間計費明細")
+                    # 顯示繳費表格
+                    st.markdown("**所有房間的繳費狀態：**")
                     st.dataframe(
-                        report_df,
+                        payment_df,
                         use_container_width=True,
                         hide_index=True,
                         column_config={
                             "房號": st.column_config.TextColumn("房號", width=80),
-                            "房間度數": st.column_config.NumberColumn("房間度數", format="%.2f", width=100),
-                            "公用分攤": st.column_config.NumberColumn("公用分攤", format="%.2f", width=100),
-                            "總度數": st.column_config.NumberColumn("總度數", format="%.2f", width=100),
-                            "應繳金額": st.column_config.NumberColumn("應繳金額", format="NT$ %d", width=120),
-                            "已繳金額": st.column_config.NumberColumn("已繳金額", format="NT$ %d", width=120),
-                            "繳費狀態": st.column_config.SelectboxColumn("繳費狀態", options=["未繳", "已繳", "部分繳"], width=100)
+                            "應繳金額": st.column_config.NumberColumn("應繳金額", format="NT$ %d", width=100),
+                            "已繳金額": st.column_config.NumberColumn("已繳金額", format="NT$ %d", width=100),
+                            "繳費狀態": st.column_config.TextColumn("繳費狀態", width=100),
+                            "繳款日期": st.column_config.TextColumn("繳款日期", width=100),
+                            "備註": st.column_config.TextColumn("備註", width=150),
+                            "更新時間": st.column_config.TextColumn("更新時間", width=120)
                         }
                     )
                     
                     st.divider()
                     
-                    st.markdown("##### 繳費標記")
+                    # === 更新繳費狀態 ===
+                    st.markdown("##### ✏️ 更新房間繳費狀態")
                     
-                    with st.form("payment_form", border=True):
-                        st.write("選擇房間並標記繳費狀態")
-                        
+                    with st.form("update_payment_form", border=True):
                         c1, c2, c3 = st.columns(3)
                         
                         with c1:
                             payment_room = st.selectbox(
                                 "選擇房號",
-                                report_df['房號'].unique(),
-                                key="payment_room"
+                                payment_df['房號'].unique(),
+                                key="update_payment_room"
                             )
                         
                         with c2:
                             payment_status = st.selectbox(
                                 "繳費狀態",
                                 ["未繳", "已繳", "部分繳"],
-                                key="payment_status"
+                                key="update_payment_status"
                             )
                         
                         with c3:
-                            payment_date = st.date_input("繳款日期", key="payment_date")
+                            payment_date = st.date_input("繳款日期", key="update_payment_date")
                         
-                        submit_payment = st.form_submit_button("✅ 標記繳費", type="primary", use_container_width=True)
+                        # 已繳金額
+                        paid_amt_col1, paid_amt_col2 = st.columns(2)
+                        with paid_amt_col1:
+                            paid_amount = st.number_input("已繳金額 (NT$)", min_value=0, step=100, key="update_paid_amount")
+                        with paid_amt_col2:
+                            notes = st.text_input("繳費備註", key="update_notes")
+                        
+                        submit_payment = st.form_submit_button("✅ 更新繳費狀態", type="primary", use_container_width=True)
                         
                         if submit_payment:
                             try:
-                                st.success(f"✅ {payment_room} 已標記為 {payment_status}")
+                                ok, msg = db.update_electricity_payment(
+                                    st.session_state.current_period_id,
+                                    payment_room,
+                                    payment_status,
+                                    paid_amount=paid_amount if payment_status != "未繳" else 0,
+                                    payment_date=payment_date.strftime("%Y-%m-%d") if payment_status != "未繳" else None,
+                                    notes=notes
+                                )
+                                
+                                if ok:
+                                    st.success(f"✅ {payment_room} 的繳費狀態已更新為 {payment_status}")
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {msg}")
                             except Exception as e:
-                                st.error(f"❌ 標記失敗: {str(e)}")
+                                st.error(f"❌ 更新失敗: {str(e)}")
                     
                     st.divider()
                     
-                    st.markdown("##### 期間統計")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        total_kwh = report_df['總度數'].sum()
-                        st.metric("總度數", f"{total_kwh:.2f}")
-                    
-                    with col2:
-                        paid_rooms = len(report_df[report_df['繳費狀態'] == '已繳'])
-                        st.metric("已繳房間", f"{paid_rooms}")
-                    
-                    with col3:
-                        unpaid_rooms = len(report_df[report_df['繳費狀態'] == '未繳'])
-                        st.metric("未繳房間", f"{unpaid_rooms}", delta_color="inverse")
+                    # === 繳費統計 ===
+                    st.markdown("##### 📊 繳費統計")
+                    try:
+                        summary = db.get_electricity_payment_summary(st.session_state.current_period_id)
+                        
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        with col1:
+                            st.metric("應收總額", f"NT$ {int(summary['total_due']):,}")
+                        with col2:
+                            st.metric("已繳總額", f"NT$ {int(summary['total_paid']):,}")
+                        with col3:
+                            st.metric("未繳餘額", f"NT$ {int(summary['total_balance']):,}")
+                        with col4:
+                            st.metric("已繳房間", f"{summary['paid_rooms']} 間")
+                        with col5:
+                            st.metric("未繳房間", f"{summary['unpaid_rooms']} 間", delta_color="inverse")
+                        
+                        # 繳款率
+                        st.progress(min(summary['collection_rate'] / 100, 1.0), text=f"繳款率: {summary['collection_rate']:.1f}%")
+                    except Exception as e:
+                        st.warning(f"⚠️ 無法計算統計: {str(e)}")
             
             except Exception as e:
-                st.error(f"❌ 讀取計費結果失敗: {str(e)}")
-                st.info("💡 請確保已在「度數輸入與計算」完成計算")
+                st.error(f"❌ 讀取繳費記錄失敗: {str(e)}")
