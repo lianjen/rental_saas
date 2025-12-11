@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 from services.db import SupabaseDB
-from views import dashboard, tenant, electricity
+from views import dashboard, tenants, electricity
 import time
 
 # 頁面配置
@@ -65,7 +65,7 @@ def main():
         if st.session_state.menu_selection == "dashboard":
             dashboard.render(db)
         elif st.session_state.menu_selection == "tenant":
-            tenant.render(db)
+            tenants.render(db)
         elif st.session_state.menu_selection == "electricity":
             electricity.render(db)
     except Exception as e:
