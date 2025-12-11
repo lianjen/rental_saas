@@ -3,6 +3,10 @@ import pandas as pd
 import time
 
 
+# 房號列表
+ROOM_NUMBERS = ["1A", "1B", "2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
+
+
 def render(db):
     """房客管理視圖"""
     st.header("👥 房客管理")
@@ -41,7 +45,7 @@ def render(db):
         with st.form("add_tenant_form", border=True):
             c1, c2 = st.columns(2)
             with c1:
-                room_number = st.text_input("房號 (必填)", placeholder="例: 101", key="room_add")
+                room_number = st.selectbox("房號 (必填)", ROOM_NUMBERS, key="room_add")
                 tenant_name = st.text_input("房客名稱 (必填)", placeholder="例: 王小明", key="name_add")
             with c2:
                 phone = st.text_input("電話 (選填)", placeholder="例: 0912-345-678", key="phone_add")
@@ -55,26 +59,36 @@ def render(db):
                 lease_end = st.date_input("租約到期日", key="end_add")
                 payment_method = st.selectbox("繳款方式", ["月繳", "半年繳", "年繳"], key="method_add")
             
+            c5, c6 = st.columns(2)
+            with c5:
+                has_water_fee = st.checkbox("有水費折100元", value=False, key="water_add")
+                annual_discount_months = st.number_input("年繳折幾個月", min_value=0, max_value=12, value=0, step=1, key="discount_add")
+            with c6:
+                discount_notes = st.text_input("折扣說明 (選填)", placeholder="例: 老客戶優惠", key="notes_add")
+            
             submit = st.form_submit_button("✅ 新增房客", type="primary", use_container_width=True)
             
             if submit:
                 # 驗證
-                if not room_number or not tenant_name:
-                    st.error("❌ 房號與房客名稱必填")
+                if not tenant_name:
+                    st.error("❌ 房客名稱必填")
                 elif lease_start >= lease_end:
                     st.error("❌ 租約開始日必須早於到期日")
                 else:
                     # 新增
                     try:
-                        ok, msg = db.add_tenant(
-                            room_number=room_number,
-                            tenant_name=tenant_name,
+                        ok, msg = db.upsert_tenant(
+                            room=room_number,
+                            name=tenant_name,
                             phone=phone,
                             deposit=deposit,
                             base_rent=base_rent,
-                            lease_start=lease_start,
-                            lease_end=lease_end,
-                            payment_method=payment_method
+                            start=lease_start,
+                            end=lease_end,
+                            payment_method=payment_method,
+                            has_water_fee=has_water_fee,
+                            annual_discount_months=annual_discount_months,
+                            discount_notes=discount_notes
                         )
                         if ok:
                             st.success(msg)
@@ -117,19 +131,32 @@ def render(db):
                                                   index=["月繳", "半年繳", "年繳"].index(tenant_data.get('payment_method', '月繳')),
                                                   key="method_edit")
                 
+                c5, c6 = st.columns(2)
+                with c5:
+                    new_has_water_fee = st.checkbox("有水費折100元", value=bool(tenant_data.get('has_water_fee', False)), key="water_edit")
+                    new_annual_discount_months = st.number_input("年繳折幾個月", min_value=0, max_value=12, 
+                                                                 value=int(tenant_data.get('annual_discount_months', 0)), 
+                                                                 step=1, key="discount_edit")
+                with c6:
+                    new_discount_notes = st.text_input("折扣說明", value=tenant_data.get('discount_notes', ''), key="notes_edit")
+                
                 submit = st.form_submit_button("💾 保存編輯", type="primary", use_container_width=True)
                 
                 if submit:
                     try:
-                        ok, msg = db.update_tenant(
-                            room_number=selected_room,
-                            tenant_name=new_tenant_name,
+                        ok, msg = db.upsert_tenant(
+                            room=selected_room,
+                            name=new_tenant_name,
                             phone=new_phone,
                             deposit=new_deposit,
                             base_rent=new_base_rent,
-                            lease_start=new_lease_start,
-                            lease_end=new_lease_end,
-                            payment_method=new_payment_method
+                            start=new_lease_start,
+                            end=new_lease_end,
+                            payment_method=new_payment_method,
+                            has_water_fee=new_has_water_fee,
+                            annual_discount_months=new_annual_discount_months,
+                            discount_notes=new_discount_notes,
+                            tenant_id=int(tenants[tenants['room_number'] == selected_room]['id'].iloc[0])
                         )
                         if ok:
                             st.success(msg)
