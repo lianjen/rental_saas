@@ -1,71 +1,83 @@
 import streamlit as st
-import os
+import pandas as pd
+from datetime import datetime, date
+from services.db import SupabaseDB
+from views import dashboard, tenant, electricity
+import time
 
-# 設定頁面配置
+# 頁面配置
 st.set_page_config(
-    page_title="幸福之家 Pro | 租務管理系統",
+    page_title="🏠 租務管理系統",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 載入自定義 CSS
-def load_css(file_name):
-    try:
-        with open(file_name) as f:
-            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-    except FileNotFoundError:
-        pass # 容錯處理
-
-css_path = os.path.join("assets", "style.css")
-load_css(css_path)
-
-# 初始化資料庫
-from services.db import SupabaseDB
-
+# 初始化資料庫連接
 @st.cache_resource
 def get_db():
-    return SupabaseDB()
+    """初始化資料庫連接"""
+    try:
+        db = SupabaseDB()
+        return db
+    except Exception as e:
+        st.error(f"❌ 資料庫連接失敗: {str(e)}")
+        return None
 
-db = get_db()
-
-# 引入所有 Views
-from views import dashboard, tenants, rent, electricity, expenses, tracking, settings
-
+# 主程式
 def main():
+    db = get_db()
+    if db is None:
+        st.stop()
+    
+    # === 側欄選單 ===
     with st.sidebar:
-        st.title("🏠 幸福之家 Pro")
-        st.markdown("<div style='font-size: 0.8rem; color: #888; margin-bottom: 20px;'>Nordic Edition v14.1</div>", unsafe_allow_html=True)
+        st.title("🏠 租務管理系統")
+        st.divider()
         
-        menu = st.radio(
-            "功能選單",
-            [
-                "📊 儀表板",
-                "💵 租金收繳",
-                "📅 繳費追蹤",
-                "👥 房客管理",
-                "⚡ 電費管理",
-                "💰 支出管理",
-                "⚙️ 系統設置"
-            ],
-            label_visibility="collapsed"
-        )
+        # 選單選項
+        menu_options = {
+            "📊 儀表板": "dashboard",
+            "👥 房客管理": "tenant",
+            "⚡ 房間抄表": "electricity"
+        }
         
-    # 路由邏輯
-    if menu == "📊 儀表板":
-        dashboard.render(db)
-    elif menu == "💵 租金收繳":
-        rent.render(db)
-    elif menu == "📅 繳費追蹤":
-        tracking.render(db)
-    elif menu == "👥 房客管理":
-        tenants.render(db)
-    elif menu == "⚡ 電費管理":
-        electricity.render(db)
-    elif menu == "💰 支出管理":
-        expenses.render(db)
-    elif menu == "⚙️ 系統設置":
-        settings.render(db)
+        # 初始化 session state 中的選單選項
+        if 'menu_selection' not in st.session_state:
+            st.session_state.menu_selection = "dashboard"
+        
+        # 顯示選單按鈕
+        st.markdown("### 選擇功能")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("📊 儀表板", use_container_width=True, key="menu_dashboard"):
+                st.session_state.menu_selection = "dashboard"
+                st.rerun()
+        with col2:
+            if st.button("👥 房客管理", use_container_width=True, key="menu_tenant"):
+                st.session_state.menu_selection = "tenant"
+                st.rerun()
+        with col3:
+            if st.button("⚡ 房間抄表", use_container_width=True, key="menu_electricity"):
+                st.session_state.menu_selection = "electricity"
+                st.rerun()
+        
+        st.divider()
+        st.caption("💡 點選上方按鈕切換功能")
+    
+    # === 主內容區域 ===
+    # 根據選單顯示對應頁面
+    try:
+        if st.session_state.menu_selection == "dashboard":
+            dashboard.render(db)
+        elif st.session_state.menu_selection == "tenant":
+            tenant.render(db)
+        elif st.session_state.menu_selection == "electricity":
+            electricity.render(db)
+    except Exception as e:
+        st.error(f"❌ 頁面加載失敗: {str(e)}")
+        st.info("請嘗試重新整理頁面或聯絡管理員")
 
 if __name__ == "__main__":
     main()
