@@ -515,6 +515,43 @@ class SupabaseDB:
                 cur.execute("SELECT * FROM electricity_period ORDER BY id DESC")
                 return cur.fetchall()
     
+    def delete_electricity_period(self, period_id: int):
+        """
+        刪除計費期間及相關所有紀錄
+        
+        params:
+            period_id: 計費期間 ID
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # 先檢查該期間是否存在
+                    cur.execute("SELECT id FROM electricity_period WHERE id=%s", (period_id,))
+                    if not cur.fetchone():
+                        return False, f"❌ 期間 ID {period_id} 不存在"
+                    
+                    # 刪除關聯的繳費記錄
+                    cur.execute("DELETE FROM electricity_payment WHERE period_id=%s", (period_id,))
+                    
+                    # 刪除關聯的電表讀數
+                    cur.execute("DELETE FROM electricity_meter WHERE period_id=%s", (period_id,))
+                    
+                    # 刪除關聯的台電單據
+                    cur.execute("DELETE FROM electricity_tdy_bill WHERE period_id=%s", (period_id,))
+                    
+                    # 刪除關聯的計費紀錄
+                    cur.execute("DELETE FROM electricity_calculation WHERE period_id=%s", (period_id,))
+                    
+                    # 最後刪除計費期間本身
+                    cur.execute("DELETE FROM electricity_period WHERE id=%s", (period_id,))
+                    
+                    logger.info(f"Period {period_id} and all related records deleted")
+                    return True, f"✅ 計費期間已刪除"
+        
+        except Exception as e:
+            logger.error(f"Delete electricity period error: {e}")
+            return False, f"❌ 刪除失敗: {str(e)}"
+    
     def add_tdy_bill(self, pid, floor, kwh, fee):
         """新增台電單據"""
         with self._get_connection() as conn:
@@ -546,8 +583,6 @@ class SupabaseDB:
                 total_kwh as "總度數", unit_price as "單價", calculated_fee as "應繳電費"
                 FROM electricity_calculation WHERE period_id = %s ORDER BY room_number
             """, conn, params=(pid,))
-    
-    # ===== 電費繳費記錄方法 (新增) =====
     
     def save_electricity_record(self, period_id, results):
         """
