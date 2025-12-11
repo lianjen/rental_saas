@@ -9,7 +9,7 @@ SHARING_ROOMS = ["2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
 
 def render(db):
     st.header("⚡ 電費管理")
-    st.markdown("Taiwan Electricity Fee Calculator v14.3")
+    st.markdown("Taiwan Electricity Fee Calculator v14.4")
     
     # 初始化 session state
     if "current_period_id" not in st.session_state:
@@ -18,9 +18,11 @@ def render(db):
         st.session_state.current_period_info = None
     if "edit_period_id" not in st.session_state:
         st.session_state.edit_period_id = None
+    if "confirm_delete" not in st.session_state:
+        st.session_state.confirm_delete = False
     if "calc_state" not in st.session_state:
         st.session_state.calc_state = {
-            "step": 1,  # 1: 輸入, 2: 結果
+            "step": 1,
             "year": datetime.now().year,
             "month": datetime.now().month,
             "tdy_kwh": 0,
@@ -104,13 +106,11 @@ def render(db):
                         with c3:
                             month_end = st.number_input("結束月份", value=edit_period['period_month_end'], min_value=1, max_value=12, key="edit_month_end")
                         
-                        c4, c5, c6 = st.columns(3)
+                        c4, c5 = st.columns(2)
                         with c4:
                             submit = st.form_submit_button("✅ 更新期間", type="primary", use_container_width=True)
                         with c5:
-                            delete = st.form_submit_button("🗑️ 刪除期間", use_container_width=True)
-                        with c6:
-                            cancel = st.form_submit_button("❌ 取消", use_container_width=True)
+                            cancel = st.form_submit_button("❌ 取消編輯", use_container_width=True)
                         
                         if submit:
                             try:
@@ -121,39 +121,44 @@ def render(db):
                             except Exception as e:
                                 st.error(f"❌ 更新失敗: {str(e)}")
                         
-                        if delete:
-                            try:
-                                # 刪除期間邏輯
-                                st.warning(f"⚠️ 確定要刪除「{edit_period['period_year']}年 {edit_period['period_month_start']}-{edit_period['period_month_end']}月」嗎？")
-                                
-                                col_confirm1, col_confirm2 = st.columns(2)
-                                with col_confirm1:
-                                    if st.button("🗑️ 確認刪除", type="secondary", use_container_width=True):
-                                        try:
-                                            # 嘗試呼叫資料庫刪除方法
-                                            try:
-                                                db.delete_electricity_period(period_id)
-                                            except:
-                                                pass  # 方法不存在，忽略
-                                            
-                                            st.success("✅ 期間已刪除")
-                                            time.sleep(1)
-                                            st.session_state.edit_period_id = None
-                                            st.session_state.current_period_id = None
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"❌ 刪除失敗: {str(e)}")
-                                
-                                with col_confirm2:
-                                    if st.button("❌ 取消刪除", use_container_width=True):
-                                        st.session_state.edit_period_id = None
-                                        st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ 刪除失敗: {str(e)}")
-                        
                         if cancel:
                             st.session_state.edit_period_id = None
                             st.rerun()
+                    
+                    # === 刪除按鈕（在 Form 外面）===
+                    st.divider()
+                    st.markdown("##### 🗑️ 危險操作")
+                    
+                    if not st.session_state.confirm_delete:
+                        if st.button("🗑️ 刪除此計費期間", type="secondary", use_container_width=True):
+                            st.session_state.confirm_delete = True
+                            st.rerun()
+                    else:
+                        st.warning(f"⚠️ 確定要刪除「{edit_period['period_year']}年 {edit_period['period_month_start']}-{edit_period['period_month_end']}月」嗎？\n\n此操作無法恢復！")
+                        
+                        col_confirm1, col_confirm2 = st.columns(2)
+                        with col_confirm1:
+                            if st.button("🗑️ 確認刪除", type="secondary", use_container_width=True):
+                                try:
+                                    # 嘗試呼叫資料庫刪除方法
+                                    try:
+                                        db.delete_electricity_period(period_id)
+                                    except:
+                                        pass  # 方法不存在，忽略
+                                    
+                                    st.success("✅ 期間已刪除")
+                                    time.sleep(1)
+                                    st.session_state.edit_period_id = None
+                                    st.session_state.confirm_delete = False
+                                    st.session_state.current_period_id = None
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ 刪除失敗: {str(e)}")
+                        
+                        with col_confirm2:
+                            if st.button("❌ 取消刪除", use_container_width=True):
+                                st.session_state.confirm_delete = False
+                                st.rerun()
                 else:
                     st.error("❌ 期間不存在或已被刪除，請重新選擇")
                     st.session_state.edit_period_id = None
@@ -164,6 +169,7 @@ def render(db):
         if st.session_state.edit_period_id is not None:
             if st.button("🔙 返回", use_container_width=True):
                 st.session_state.edit_period_id = None
+                st.session_state.confirm_delete = False
                 st.rerun()
         
         st.divider()
@@ -183,6 +189,7 @@ def render(db):
                         with c2:
                             if st.button("✏️ 編輯", key=f"edit_{period['id']}", use_container_width=True):
                                 st.session_state.edit_period_id = period['id']
+                                st.session_state.confirm_delete = False
                                 st.rerun()
                         
                         with c3:
