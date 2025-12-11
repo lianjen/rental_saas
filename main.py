@@ -1,27 +1,4 @@
 import streamlit as st
-import psycopg2
-import sys
-
-# --- 診斷開始 ---
-st.write("### 🔍 連線診斷模式")
-
-try:
-    # 嘗試直接印出 secrets 的內容（遮蔽密碼）來檢查
-    creds = st.secrets["supabase"]
-    st.write(f"正在嘗試連線到 Host: `{creds['host']}`")
-    st.write(f"使用 User: `{creds['user']}`")  # <--- 關鍵！看這裡印出什麼
-    
-    # 嘗試連線
-    conn = psycopg2.connect(**creds)
-    st.success("✅ 連線成功！")
-    conn.close()
-    
-except Exception as e:
-    st.error(f"❌ 連線失敗: {e}")
-    st.stop() # 停止執行後面的程式
-# --- 診斷結束 ---
-
-import streamlit as st
 import os
 
 # 設定頁面配置 (必須是第一行 Streamlit 指令)
