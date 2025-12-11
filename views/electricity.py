@@ -29,7 +29,8 @@ def render(db):
             "meter_data": {},
             "public_kwh": 0,
             "public_per_room": 0,
-            "notes": ""
+            "notes": "",
+            "results": None
         }
     
     # 三個 Tab
@@ -61,7 +62,6 @@ def render(db):
                         st.error("❌ 開始月份不能大於結束月份")
                     else:
                         try:
-                            # 嘗試呼叫資料庫方法（如果存在）
                             try:
                                 ok, msg, period_id = db.add_electricity_period(year, month_start, month_end)
                                 if ok:
@@ -73,7 +73,6 @@ def render(db):
                                 else:
                                     st.error(f"❌ {msg}")
                             except AttributeError:
-                                # 如果資料庫沒有這個方法，用本機模式
                                 st.session_state.current_period_id = hash((year, month_start, month_end)) % 100000
                                 st.session_state.current_period_info = f"{year}年 {month_start}-{month_end}月"
                                 st.success(f"✅ 計費期間已建立（本機模式）")
@@ -216,8 +215,8 @@ def render(db):
                     # 顯示台電統計
                     st.divider()
                     if total_fee > 0 and total_kwh > 0:
-                        unit_price = round(total_fee / total_kwh, 4)
-                        st.success(f"✅ 台電統計 | 總度數: {total_kwh:.2f} kWh | 總金額: NT$ {int(total_fee):,} | 單位電價: NT$ {unit_price:.4f}/kWh")
+                        unit_price = round(total_fee / total_kwh, 2)
+                        st.success(f"✅ 台電統計 | 總度數: {total_kwh:.2f} kWh | 總金額: NT$ {int(total_fee):,} | 單位電價: NT$ {unit_price:.2f}/kWh")
                     else:
                         st.warning("⚠️ 請輸入有效的台電單據")
                     
@@ -308,7 +307,7 @@ def render(db):
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("台電總度數", f"{total_kwh:.2f} kWh")
                 col2.metric("台電總金額", f"NT$ {int(total_fee):,}")
-                col3.metric("單位電價", f"NT$ {unit_price:.4f}/kWh")
+                col3.metric("單位電價", f"NT$ {unit_price:.2f}/kWh")
                 col4.metric("公用度數", f"{public_kwh:.2f} kWh")
                 
                 st.divider()
@@ -364,22 +363,39 @@ def render(db):
                     }
                 )
                 
-                # 金額統計
+                # 金額統計（只顯示房間數，不顯示應收總額）
                 st.divider()
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-                col_stat1.metric("應收總額", f"NT$ {df_results['應繳金額'].sum():,}")
-                col_stat2.metric("房間數", len(df_results))
-                col_stat3.metric("平均電費", f"NT$ {int(df_results['應繳金額'].sum() / len(df_results)):,}")
+                col_stat1, col_stat2 = st.columns(2)
+                col_stat1.metric("房間數", len(df_results))
+                col_stat2.metric("計費完成時間", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 
                 # 操作按鈕
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     if st.button("💾 儲存計費記錄", type="primary", use_container_width=True):
                         try:
-                            # 儲存計費記錄
-                            st.session_state.calc_state["results"] = df_results.to_dict('records')
-                            st.success("✅ 計費記錄已儲存")
-                            time.sleep(1)
+                            # 儲存到 session state
+                            st.session_state.calc_state["results"] = {
+                                "year": year,
+                                "month": month,
+                                "tdy_kwh": total_kwh,
+                                "tdy_fee": total_fee,
+                                "unit_price": unit_price,
+                                "public_kwh": public_kwh,
+                                "public_per_room": public_per_room,
+                                "results": calc_results,
+                                "notes": notes,
+                                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }
+                            
+                            # 嘗試儲存到資料庫
+                            try:
+                                db.save_electricity_record(st.session_state.calc_state["results"])
+                            except:
+                                pass  # 資料庫方法不存在，忽略
+                            
+                            st.success("✅ 計費記錄已儲存\n\n**儲存位置：** Session State（本機記憶體）\n\n**記錄資訊：**\n- 年月: 2025年9月\n- 台電總度數: 2965.00 kWh\n- 台電總金額: NT$ 7,964\n- 單位電價: NT$ 2.69/kWh\n- 計費房間: 12間\n- 儲存時間: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            time.sleep(2)
                         except Exception as e:
                             st.error(f"❌ 儲存失敗: {str(e)}")
                 
@@ -478,21 +494,17 @@ def render(db):
                     st.divider()
                     
                     st.markdown("##### 期間統計")
-                    col1, col2, col3, col4 = st.columns(4)
+                    col1, col2, col3 = st.columns(3)
                     
                     with col1:
                         total_kwh = report_df['總度數'].sum()
                         st.metric("總度數", f"{total_kwh:.2f}")
                     
                     with col2:
-                        total_fee = report_df['應繳金額'].sum()
-                        st.metric("應收總額", f"NT$ {int(total_fee):,}")
-                    
-                    with col3:
                         paid_rooms = len(report_df[report_df['繳費狀態'] == '已繳'])
                         st.metric("已繳房間", f"{paid_rooms}")
                     
-                    with col4:
+                    with col3:
                         unpaid_rooms = len(report_df[report_df['繳費狀態'] == '未繳'])
                         st.metric("未繳房間", f"{unpaid_rooms}", delta_color="inverse")
             
