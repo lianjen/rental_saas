@@ -228,44 +228,44 @@ def render(db):
             st.divider()
             
             with st.form("meter_form", border=True):
-                # 直接建立 12 個 Tab，按順序排列
+                # 按人性化順序排列 tab - 改成按順序顯示
+                tab_rooms = st.tabs(ROOM_NUMBERS)
+                
                 meter_data = {}
                 
-                # 使用 st.tabs 建立所有 Tab
-                tab_list = st.tabs(ROOM_NUMBERS)
-                
-                # 逐一填充每個 Tab 的內容
-                for idx, room_num in enumerate(ROOM_NUMBERS):
-                    with tab_list[idx]:
+                for room_idx, room_num in enumerate(ROOM_NUMBERS):
+                    with tab_rooms[room_idx]:
                         st.write(f"房間 **{room_num}** 的度數")
                         st.markdown("**上期 → 本期**")
                         
                         c1, c2 = st.columns(2)
                         with c1:
-                            st.markdown("##### 📍 上期度數")
+                            st.markdown("#### 📍 上期度數")
                             meter_start = st.number_input(
-                                "上期",
+                                "上期度數",
                                 min_value=0.0,
                                 value=0.0,
                                 step=0.1,
                                 format="%.2f",
-                                key=f"start_{room_num}"
+                                key=f"meter_start_{room_num}",
+                                label_visibility="collapsed"
                             )
                         with c2:
-                            st.markdown("##### 📍 本期度數")
+                            st.markdown("#### 📍 本期度數")
                             meter_end = st.number_input(
-                                "本期",
+                                "本期度數",
                                 min_value=0.0,
                                 value=0.0,
                                 step=0.1,
                                 format="%.2f",
-                                key=f"end_{room_num}"
+                                key=f"meter_end_{room_num}",
+                                label_visibility="collapsed"
                             )
                         
                         # 計算使用度數（四捨五入到小數第二位）
                         if meter_end >= meter_start:
                             usage = round(meter_end - meter_start, 2)
-                            st.metric("💡 本期用量", f"{usage:.2f} 度")
+                            st.metric("💡 本期用量", f"{usage:.2f} 度", delta=None)
                             meter_data[room_num] = (meter_start, meter_end, usage)
                         else:
                             st.warning("⚠️ 本期度數不能小於上期度數")
