@@ -1,0 +1,6 @@
+streamlit
+psycopg2-binary
+pandas
+pytz
+SQLAlchemy
+python-dateutil
