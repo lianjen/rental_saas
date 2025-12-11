@@ -18,9 +18,22 @@ def render(db):
         st.session_state.current_period_info = None
     if "edit_period_id" not in st.session_state:
         st.session_state.edit_period_id = None
+    if "calc_state" not in st.session_state:
+        st.session_state.calc_state = {
+            "step": 1,  # 1: 輸入, 2: 結果
+            "year": datetime.now().year,
+            "month": datetime.now().month,
+            "tdy_kwh": 0,
+            "tdy_fee": 0,
+            "unit_price": 0,
+            "meter_data": {},
+            "public_kwh": 0,
+            "public_per_room": 0,
+            "notes": ""
+        }
     
     # 三個 Tab
-    tab1, tab2, tab3 = st.tabs(["📋 計費期間", "📊 度數輸入", "📈 計費結果"])
+    tab1, tab2, tab3 = st.tabs(["📋 計費期間", "📊 度數輸入與計算", "📈 計費結果"])
     
     # ===== TAB 1: 計費期間設定 =====
     with tab1:
@@ -32,22 +45,16 @@ def render(db):
             st.markdown("##### 新增計費期間")
             
             with st.form("period_form", border=True):
-                st.write("輸入計費期間資訊")
+                st.write("輸入計費期間資訊（台電度數和金額將在度數輸入時計算）")
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     year = st.number_input("年度", value=datetime.now().year, min_value=2020, max_value=2100, key="new_year")
                 with c2:
                     month_start = st.number_input("開始月份", value=1, min_value=1, max_value=12, key="new_month_start")
                 with c3:
-                    month_end = st.number_input("結束月份", value=2, min_value=1, max_value=12, key="new_month_end")
+                    month_end = st.number_input("結束月份", value=1, min_value=1, max_value=12, key="new_month_end")
                 
-                c4, c5 = st.columns(2)
-                with c4:
-                    tdy_kwh = st.number_input("台電總度數", min_value=0.0, value=0.0, step=0.1, format="%.2f", key="new_tdy_kwh")
-                with c5:
-                    tdy_fee = st.number_input("台電總金額 (NT$)", min_value=0, value=0, step=100, key="new_tdy_fee")
-                
-                submit = st.form_submit_button("✅ 新增計費期間", type="primary", use_container_width=True)
+                submit = st.form_submit_button("✅ 建立計費期間", type="primary", use_container_width=True)
                 
                 if submit:
                     if month_start > month_end:
@@ -58,9 +65,6 @@ def render(db):
                             try:
                                 ok, msg, period_id = db.add_electricity_period(year, month_start, month_end)
                                 if ok:
-                                    # 如果期間建立成功，加入台電單據
-                                    if tdy_kwh > 0 and tdy_fee > 0:
-                                        db.add_tdy_bill(period_id, "TDY", tdy_kwh, tdy_fee)
                                     st.session_state.current_period_id = period_id
                                     st.session_state.current_period_info = f"{year}年 {month_start}-{month_end}月"
                                     st.success(f"✅ {msg}")
@@ -69,7 +73,7 @@ def render(db):
                                 else:
                                     st.error(f"❌ {msg}")
                             except AttributeError:
-                                # 如果資料庫沒有這個方法，用簡化版
+                                # 如果資料庫沒有這個方法，用本機模式
                                 st.session_state.current_period_id = hash((year, month_start, month_end)) % 100000
                                 st.session_state.current_period_info = f"{year}年 {month_start}-{month_end}月"
                                 st.success(f"✅ 計費期間已建立（本機模式）")
@@ -101,21 +105,6 @@ def render(db):
                         with c3:
                             month_end = st.number_input("結束月份", value=edit_period['period_month_end'], min_value=1, max_value=12, key="edit_month_end")
                         
-                        c4, c5 = st.columns(2)
-                        with c4:
-                            tdy_kwh = st.number_input("台電總度數", min_value=0.0, value=float(edit_period.get('tdy_total_kwh', 0)), step=0.1, format="%.2f", key="edit_tdy_kwh")
-                        with c5:
-                            tdy_fee = st.number_input("台電總金額 (NT$)", min_value=0, value=int(edit_period.get('tdy_total_fee', 0)), step=100, key="edit_tdy_fee")
-                        
-                        st.markdown("---")
-                        
-                        # 顯示電價資訊
-                        if tdy_kwh > 0 and tdy_fee > 0:
-                            unit_price = round(tdy_fee / tdy_kwh, 2)
-                            st.info(f"📌 目前電價: NT$ {tdy_fee} / {tdy_kwh:.2f} kWh = NT$ {unit_price:.2f}/kWh")
-                        else:
-                            st.warning("⚠️ 請輸入有效的台電資料")
-                        
                         c6, c7 = st.columns(2)
                         with c6:
                             submit = st.form_submit_button("✅ 更新期間", type="primary", use_container_width=True)
@@ -124,8 +113,6 @@ def render(db):
                         
                         if submit:
                             try:
-                                if tdy_kwh > 0 and tdy_fee > 0:
-                                    db.add_tdy_bill(period_id, "TDY", tdy_kwh, tdy_fee)
                                 st.success("✅ 期間已更新")
                                 time.sleep(1)
                                 st.session_state.edit_period_id = None
@@ -160,11 +147,6 @@ def render(db):
                         with c1:
                             period_label = f"{period['period_year']}年 {period['period_month_start']}-{period['period_month_end']}月"
                             st.write(period_label)
-                            
-                            # 顯示台電單據資訊
-                            if period.get('tdy_total_kwh') and period.get('tdy_total_fee'):
-                                unit_price = round(period['tdy_total_fee'] / period['tdy_total_kwh'], 2)
-                                st.caption(f"📌 NT$ {period['tdy_total_fee']} / {period['tdy_total_kwh']:.2f} kWh = NT$ {unit_price:.2f}/kWh")
                         
                         with c2:
                             if st.button("✏️ 編輯", key=f"edit_{period['id']}", use_container_width=True):
@@ -184,85 +166,231 @@ def render(db):
         except Exception as e:
             st.error(f"❌ 讀取失敗: {str(e)}")
     
-    # ===== TAB 2: 度數輸入 =====
+    # ===== TAB 2: 度數輸入與計算 =====
     with tab2:
-        st.subheader("📊 房間度數輸入")
+        st.subheader("📊 度數輸入與計算")
         
         if not st.session_state.current_period_id:
             st.warning("⚠️ 請先在「計費期間」選擇或建立一個期間")
         else:
             st.info(f"📌 目前期間: {st.session_state.current_period_info}")
             
-            st.markdown("##### 逐個房間輸入電表讀數")
-            st.markdown("輸入**上期度數** → **本期度數**")
-            st.divider()
-            
-            with st.form("meter_form", border=True):
-                # 用 Tab 方式展示各房間
-                tab_rooms = st.tabs(ROOM_NUMBERS)
-                meter_data = {}
+            if st.session_state.calc_state["step"] == 1:
+                # 度數輸入表單
+                st.markdown("##### 輸入各樓層台電單據與全部房間度數")
                 
-                for room_idx, room_num in enumerate(ROOM_NUMBERS):
-                    with tab_rooms[room_idx]:
-                        st.write(f"**房間 {room_num}**")
-                        st.markdown("輸入電表讀數 (度)")
+                with st.form("electricity_input_form", border=True):
+                    # 年月份
+                    col_date1, col_date2 = st.columns(2)
+                    with col_date1:
+                        year = st.number_input("年份", value=st.session_state.calc_state["year"], min_value=2020, max_value=2100)
+                    with col_date2:
+                        month = st.number_input("月份", value=st.session_state.calc_state["month"], min_value=1, max_value=12)
+                    
+                    st.divider()
+                    
+                    # A. 各樓層台電單據
+                    st.markdown("#### A️⃣ 各樓層台電單據")
+                    st.markdown("**輸入台電帳單上的資訊（金額/度數）**")
+                    
+                    col_header = st.columns([1, 2, 2])
+                    col_header[0].markdown("**樓層**")
+                    col_header[1].markdown("**金額 (NT$)**")
+                    col_header[2].markdown("**度數 (kWh)**")
+                    
+                    tdy_data = {}
+                    total_fee = 0
+                    total_kwh = 0
+                    
+                    for floor_name, floor_key in [("2樓", "2F"), ("3樓", "3F"), ("4樓", "4F")]:
+                        cols = st.columns([1, 2, 2])
+                        cols[0].write(floor_name)
+                        fee = cols[1].number_input(f"金額", min_value=0, step=100, key=f"fee_{floor_key}")
+                        kwh = cols[2].number_input(f"度數", min_value=0.0, step=1.0, key=f"kwh_{floor_key}")
                         
-                        c1, c2 = st.columns(2)
+                        if fee > 0 and kwh > 0:
+                            tdy_data[floor_key] = (fee, kwh)
+                            total_fee += fee
+                            total_kwh += kwh
+                    
+                    # 顯示台電統計
+                    st.divider()
+                    if total_fee > 0 and total_kwh > 0:
+                        unit_price = round(total_fee / total_kwh, 4)
+                        st.success(f"✅ 台電統計 | 總度數: {total_kwh:.2f} kWh | 總金額: NT$ {int(total_fee):,} | 單位電價: NT$ {unit_price:.4f}/kWh")
+                    else:
+                        st.warning("⚠️ 請輸入有效的台電單據")
+                    
+                    st.divider()
+                    
+                    # B. 所有房間度數（同一表單）
+                    st.markdown("#### B️⃣ 所有房間電表讀數")
+                    st.markdown("**輸入所有房間的電表讀數（上期 → 本期）**")
+                    
+                    meter_data = {}
+                    
+                    # 用 columns 方式展示，每行 4 個房間
+                    col_rooms = st.columns(4)
+                    for i, room in enumerate(ROOM_NUMBERS):
+                        with col_rooms[i % 4]:
+                            st.markdown(f"**{room}**")
+                            start = st.number_input(f"上期", min_value=0.0, step=1.0, key=f"start_{room}", label_visibility="collapsed")
+                            end = st.number_input(f"本期", min_value=0.0, step=1.0, key=f"end_{room}", label_visibility="collapsed")
+                            meter_data[room] = (start, end)
+                    
+                    st.divider()
+                    
+                    # 備註
+                    notes = st.text_area("計算備註（選填）", value="", height=60)
+                    
+                    # 提交
+                    submit_btn = st.form_submit_button("▶️ 進行計算", type="primary", use_container_width=True)
+                    
+                    if submit_btn:
+                        # 驗證台電數據
+                        if not tdy_data:
+                            st.error("❌ 請輸入有效的台電單據")
+                            st.stop()
                         
-                        with c1:
-                            st.markdown("**上期度數**")
-                            meter_start = st.number_input(
-                                "上期",
-                                min_value=0.0,
-                                value=0.0,
-                                step=0.1,
-                                format="%.2f",
-                                key=f"meter_start_{room_num}",
-                                label_visibility="collapsed"
-                            )
+                        # 驗證房間抄表
+                        valid_rooms = 0
+                        total_meter_kwh = 0
+                        for room in SHARING_ROOMS:
+                            start, end = meter_data[room]
+                            if end > start:
+                                usage = round(end - start, 2)
+                                valid_rooms += 1
+                                total_meter_kwh += usage
                         
-                        with c2:
-                            st.markdown("**本期度數**")
-                            meter_end = st.number_input(
-                                "本期",
-                                min_value=0.0,
-                                value=0.0,
-                                step=0.1,
-                                format="%.2f",
-                                key=f"meter_end_{room_num}",
-                                label_visibility="collapsed"
-                            )
+                        if valid_rooms == 0:
+                            st.error("❌ 沒有有效的分攤房間度數")
+                            st.stop()
                         
-                        # 計算使用度數
-                        if meter_end >= meter_start:
-                            usage = round(meter_end - meter_start, 2)
-                            st.metric("本期使用", f"{usage:.2f} 度", delta=None)
-                            meter_data[room_num] = (meter_start, meter_end, usage)
-                        else:
-                            st.warning("❌ 本期度數 < 上期度數")
-                            meter_data[room_num] = (meter_start, meter_end, 0)
+                        # 計算公用電
+                        public_kwh = round(total_kwh - total_meter_kwh, 2)
+                        if public_kwh < 0:
+                            st.error("❌ 計算錯誤：房間總度數超過台電總度數")
+                            st.stop()
+                        
+                        public_per_room = round(public_kwh / len(SHARING_ROOMS), 2)
+                        
+                        # 儲存到 session state
+                        st.session_state.calc_state["step"] = 2
+                        st.session_state.calc_state["year"] = year
+                        st.session_state.calc_state["month"] = month
+                        st.session_state.calc_state["tdy_kwh"] = total_kwh
+                        st.session_state.calc_state["tdy_fee"] = total_fee
+                        st.session_state.calc_state["meter_data"] = meter_data
+                        st.session_state.calc_state["unit_price"] = unit_price
+                        st.session_state.calc_state["public_kwh"] = public_kwh
+                        st.session_state.calc_state["public_per_room"] = public_per_room
+                        st.session_state.calc_state["notes"] = notes
+                        
+                        st.success("✅ 計算完成！請切換到「計費結果」查看詳細資訊")
+                        time.sleep(1)
+                        st.rerun()
+            
+            else:
+                # 計算結果顯示
+                year = st.session_state.calc_state["year"]
+                month = st.session_state.calc_state["month"]
+                total_kwh = st.session_state.calc_state["tdy_kwh"]
+                total_fee = st.session_state.calc_state["tdy_fee"]
+                meter_data = st.session_state.calc_state["meter_data"]
+                unit_price = st.session_state.calc_state["unit_price"]
+                public_kwh = st.session_state.calc_state["public_kwh"]
+                public_per_room = st.session_state.calc_state["public_per_room"]
+                notes = st.session_state.calc_state["notes"]
+                
+                st.subheader(f"✅ {year}年{month}月 計算完成")
+                
+                # === 台電匯總 ===
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("台電總度數", f"{total_kwh:.2f} kWh")
+                col2.metric("台電總金額", f"NT$ {int(total_fee):,}")
+                col3.metric("單位電價", f"NT$ {unit_price:.4f}/kWh")
+                col4.metric("公用度數", f"{public_kwh:.2f} kWh")
                 
                 st.divider()
                 
-                submit_meter = st.form_submit_button("✅ 確認輸入", type="primary", use_container_width=True)
+                # === 各房間電費計算 ===
+                st.subheader("🏠 各房間電費計算")
                 
-                if submit_meter:
-                    success_count = 0
-                    try:
-                        for room_num, (start, end, usage) in meter_data.items():
-                            if end > start:  # 只儲存有效的讀數
-                                try:
-                                    db.add_meter_reading(st.session_state.current_period_id, room_num, start, end)
-                                    success_count += 1
-                                except:
-                                    # 如果資料庫方法不存在，繼續
-                                    success_count += 1
-                        
-                        st.success(f"✅ 已儲存 {success_count} 個房間的度數")
-                        time.sleep(1)
+                calc_results = []
+                
+                # 獨享房間 (1A, 1B)
+                for room in ["1A", "1B"]:
+                    start, end = meter_data[room]
+                    if end > start:
+                        usage = round(end - start, 2)
+                        fee = round(usage * unit_price, 0)
+                        calc_results.append({
+                            "房號": room,
+                            "類型": "獨享",
+                            "使用度數": usage,
+                            "公用分攤": 0,
+                            "總度數": usage,
+                            "應繳金額": int(fee)
+                        })
+                
+                # 分攤房間 (2A, 2B, 3A, 3B, 3C, 3D, 4A, 4B, 4C, 4D)
+                for room in SHARING_ROOMS:
+                    start, end = meter_data[room]
+                    if end > start:
+                        usage = round(end - start, 2)
+                        total_usage = round(usage + public_per_room, 2)
+                        fee = round(total_usage * unit_price, 0)
+                        calc_results.append({
+                            "房號": room,
+                            "類型": "分攤",
+                            "使用度數": usage,
+                            "公用分攤": public_per_room,
+                            "總度數": total_usage,
+                            "應繳金額": int(fee)
+                        })
+                
+                df_results = pd.DataFrame(calc_results)
+                st.dataframe(
+                    df_results,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "房號": st.column_config.TextColumn("房號", width=60),
+                        "類型": st.column_config.TextColumn("類型", width=60),
+                        "使用度數": st.column_config.NumberColumn("使用度數", format="%.2f kWh"),
+                        "公用分攤": st.column_config.NumberColumn("公用分攤", format="%.2f kWh"),
+                        "總度數": st.column_config.NumberColumn("總度數", format="%.2f kWh"),
+                        "應繳金額": st.column_config.NumberColumn("應繳金額", format="NT$ %d")
+                    }
+                )
+                
+                # 金額統計
+                st.divider()
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1.metric("應收總額", f"NT$ {df_results['應繳金額'].sum():,}")
+                col_stat2.metric("房間數", len(df_results))
+                col_stat3.metric("平均電費", f"NT$ {int(df_results['應繳金額'].sum() / len(df_results)):,}")
+                
+                # 操作按鈕
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("💾 儲存計費記錄", type="primary", use_container_width=True):
+                        try:
+                            # 儲存計費記錄
+                            st.session_state.calc_state["results"] = df_results.to_dict('records')
+                            st.success("✅ 計費記錄已儲存")
+                            time.sleep(1)
+                        except Exception as e:
+                            st.error(f"❌ 儲存失敗: {str(e)}")
+                
+                with col_btn2:
+                    if st.button("🔄 重新計算", use_container_width=True):
+                        st.session_state.calc_state["step"] = 1
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 儲存失敗: {str(e)}")
+                
+                # 備註顯示
+                if notes:
+                    st.info(f"📝 備註: {notes}")
     
     # ===== TAB 3: 計費結果 =====
     with tab3:
@@ -273,7 +401,7 @@ def render(db):
         else:
             st.info(f"📌 目前期間: {st.session_state.current_period_info}")
             
-            st.markdown("##### 電費計算與繳費狀態")
+            st.markdown("##### 電費繳款狀態管理")
             st.divider()
             
             try:
@@ -370,4 +498,4 @@ def render(db):
             
             except Exception as e:
                 st.error(f"❌ 讀取計費結果失敗: {str(e)}")
-                st.info("💡 請確保已在「度數輸入」輸入所有房間度數")
+                st.info("💡 請確保已在「度數輸入與計算」完成計算")
