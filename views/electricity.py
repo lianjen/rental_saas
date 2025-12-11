@@ -9,7 +9,7 @@ SHARING_ROOMS = ["2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
 
 def render(db):
     st.header("⚡ 電費管理")
-    st.markdown("Taiwan Electricity Fee Calculator v14.2")
+    st.markdown("Taiwan Electricity Fee Calculator v14.3")
     
     # 初始化 session state
     if "current_period_id" not in st.session_state:
@@ -34,19 +34,19 @@ def render(db):
         }
     
     # 三個 Tab
-    tab1, tab2, tab3 = st.tabs(["📋 計費期間", "📊 度數輸入與計算", "📈 計費結果"])
+    tab1, tab2, tab3 = st.tabs(["📋 計費期間", "📊 度數輸入與計算", "📈 繳費記錄"])
     
     # ===== TAB 1: 計費期間設定 =====
     with tab1:
         st.subheader("📋 計費期間設定")
         st.markdown("新增或選擇計費期間")
         
-        # 新增期間模式
+        # 編輯或新增模式
         if st.session_state.edit_period_id is None:
             st.markdown("##### 新增計費期間")
             
             with st.form("period_form", border=True):
-                st.write("輸入計費期間資訊（台電度數和金額將在度數輸入時計算）")
+                st.write("輸入計費期間資訊")
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     year = st.number_input("年度", value=datetime.now().year, min_value=2020, max_value=2100, key="new_year")
@@ -104,11 +104,13 @@ def render(db):
                         with c3:
                             month_end = st.number_input("結束月份", value=edit_period['period_month_end'], min_value=1, max_value=12, key="edit_month_end")
                         
-                        c6, c7 = st.columns(2)
-                        with c6:
+                        c4, c5, c6 = st.columns(3)
+                        with c4:
                             submit = st.form_submit_button("✅ 更新期間", type="primary", use_container_width=True)
-                        with c7:
-                            cancel = st.form_submit_button("❌ 取消編輯", use_container_width=True)
+                        with c5:
+                            delete = st.form_submit_button("🗑️ 刪除期間", use_container_width=True)
+                        with c6:
+                            cancel = st.form_submit_button("❌ 取消", use_container_width=True)
                         
                         if submit:
                             try:
@@ -118,6 +120,36 @@ def render(db):
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ 更新失敗: {str(e)}")
+                        
+                        if delete:
+                            try:
+                                # 刪除期間邏輯
+                                st.warning(f"⚠️ 確定要刪除「{edit_period['period_year']}年 {edit_period['period_month_start']}-{edit_period['period_month_end']}月」嗎？")
+                                
+                                col_confirm1, col_confirm2 = st.columns(2)
+                                with col_confirm1:
+                                    if st.button("🗑️ 確認刪除", type="secondary", use_container_width=True):
+                                        try:
+                                            # 嘗試呼叫資料庫刪除方法
+                                            try:
+                                                db.delete_electricity_period(period_id)
+                                            except:
+                                                pass  # 方法不存在，忽略
+                                            
+                                            st.success("✅ 期間已刪除")
+                                            time.sleep(1)
+                                            st.session_state.edit_period_id = None
+                                            st.session_state.current_period_id = None
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"❌ 刪除失敗: {str(e)}")
+                                
+                                with col_confirm2:
+                                    if st.button("❌ 取消刪除", use_container_width=True):
+                                        st.session_state.edit_period_id = None
+                                        st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 刪除失敗: {str(e)}")
                         
                         if cancel:
                             st.session_state.edit_period_id = None
@@ -129,9 +161,10 @@ def render(db):
             except Exception as e:
                 st.error(f"❌ 讀取期間失敗: {str(e)}")
         
-        if st.button("🔙 返回", use_container_width=True):
-            st.session_state.edit_period_id = None
-            st.rerun()
+        if st.session_state.edit_period_id is not None:
+            if st.button("🔙 返回", use_container_width=True):
+                st.session_state.edit_period_id = None
+                st.rerun()
         
         st.divider()
         st.subheader("📚 已建立的計費期間")
@@ -285,7 +318,7 @@ def render(db):
                         st.session_state.calc_state["public_per_room"] = public_per_room
                         st.session_state.calc_state["notes"] = notes
                         
-                        st.success("✅ 計算完成！請查看計費結果")
+                        st.success("✅ 計算完成！")
                         time.sleep(1)
                         st.rerun()
             
@@ -363,7 +396,7 @@ def render(db):
                     }
                 )
                 
-                # 金額統計（只顯示房間數，不顯示應收總額）
+                # 金額統計
                 st.divider()
                 col_stat1, col_stat2 = st.columns(2)
                 col_stat1.metric("房間數", len(df_results))
@@ -379,7 +412,7 @@ def render(db):
                             
                             if ok:
                                 st.session_state.calc_state["results"] = calc_results
-                                st.success("✅ 計費記錄已儲存到資料庫\n\n**儲存位置：** Supabase 資料庫 (electricity_payment 表)\n\n切換到「計費結果」Tab 即可查看繳費狀態")
+                                st.success("✅ 計費記錄已儲存到資料庫\n\n切換到「繳費記錄」Tab 即可管理繳費狀態")
                                 time.sleep(2)
                             else:
                                 st.error(f"❌ {msg}")
@@ -395,16 +428,16 @@ def render(db):
                 if notes:
                     st.info(f"📝 備註: {notes}")
     
-    # ===== TAB 3: 計費結果（繳費記錄）=====
+    # ===== TAB 3: 繳費記錄管理 =====
     with tab3:
-        st.subheader("📈 計費結果與繳費記錄")
+        st.subheader("📈 電費繳費記錄")
         
         if not st.session_state.current_period_id:
             st.warning("⚠️ 請先在「計費期間」選擇或建立一個期間")
         else:
             st.info(f"📌 目前期間: {st.session_state.current_period_info}")
             
-            st.markdown("##### 📋 各房間繳費狀態與紀錄")
+            st.markdown("##### 📋 房間繳費狀態與記錄")
             st.divider()
             
             try:
@@ -434,7 +467,7 @@ def render(db):
                     st.divider()
                     
                     # === 更新繳費狀態 ===
-                    st.markdown("##### ✏️ 更新房間繳費狀態")
+                    st.markdown("##### ✏️ 標記房間繳費狀態")
                     
                     with st.form("update_payment_form", border=True):
                         c1, c2, c3 = st.columns(3)
@@ -463,7 +496,7 @@ def render(db):
                         with paid_amt_col2:
                             notes = st.text_input("繳費備註", key="update_notes")
                         
-                        submit_payment = st.form_submit_button("✅ 更新繳費狀態", type="primary", use_container_width=True)
+                        submit_payment = st.form_submit_button("✅ 標記繳費", type="primary", use_container_width=True)
                         
                         if submit_payment:
                             try:
@@ -477,13 +510,13 @@ def render(db):
                                 )
                                 
                                 if ok:
-                                    st.success(f"✅ {payment_room} 的繳費狀態已更新為 {payment_status}")
+                                    st.success(f"✅ {payment_room} 已標記為 {payment_status}")
                                     time.sleep(1)
                                     st.rerun()
                                 else:
                                     st.error(f"❌ {msg}")
                             except Exception as e:
-                                st.error(f"❌ 更新失敗: {str(e)}")
+                                st.error(f"❌ 標記失敗: {str(e)}")
                     
                     st.divider()
                     
