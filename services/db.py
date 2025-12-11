@@ -490,6 +490,197 @@ class SupabaseDB:
             """, conn)
     
     # ==========================
+    # 電費管理 (Electricity)
+    # ==========================
+    
+    def add_electricity_period(self, year, ms, me):
+        """新增計費期間"""
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM electricity_period WHERE period_year=%s AND period_month_start=%s AND period_month_end=%s", (year, ms, me))
+                    if cur.fetchone():
+                        return True, "✅ 期間已存在", 0
+                    
+                    cur.execute("INSERT INTO electricity_period(period_year, period_month_start, period_month_end) VALUES(%s, %s, %s) RETURNING id", (year, ms, me))
+                    new_id = cur.fetchone()[0]
+                    return True, "✅ 新增成功", new_id
+        except Exception as e:
+            return False, str(e), 0
+    
+    def get_all_periods(self):
+        """取得所有計費期間"""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM electricity_period ORDER BY id DESC")
+                return cur.fetchall()
+    
+    def add_tdy_bill(self, pid, floor, kwh, fee):
+        """新增台電單據"""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO electricity_tdy_bill(period_id, floor_name, tdy_total_kwh, tdy_total_fee)
+                    VALUES(%s, %s, %s, %s)
+                    ON CONFLICT (period_id, floor_name) DO UPDATE SET
+                    tdy_total_kwh=EXCLUDED.tdy_total_kwh, tdy_total_fee=EXCLUDED.tdy_total_fee
+                """, (pid, floor, kwh, fee))
+    
+    def add_meter_reading(self, pid, room, start, end):
+        """新增電表讀數"""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                usage = round(end - start, 2)
+                cur.execute("""
+                    INSERT INTO electricity_meter(period_id, room_number, meter_start_reading, meter_end_reading, meter_kwh_usage)
+                    VALUES(%s, %s, %s, %s, %s)
+                    ON CONFLICT (period_id, room_number) DO UPDATE SET
+                    meter_start_reading=EXCLUDED.meter_start_reading, meter_end_reading=EXCLUDED.meter_end_reading, meter_kwh_usage=EXCLUDED.meter_kwh_usage
+                """, (pid, room, start, end, usage))
+    
+    def get_period_report(self, pid):
+        """取得計費報告"""
+        with self._get_connection() as conn:
+            return pd.read_sql("""
+                SELECT room_number as "房號", private_kwh as "房間度數", public_kwh as "公用分攤",
+                total_kwh as "總度數", unit_price as "單價", calculated_fee as "應繳電費"
+                FROM electricity_calculation WHERE period_id = %s ORDER BY room_number
+            """, conn, params=(pid,))
+    
+    # ===== 電費繳費記錄方法 (新增) =====
+    
+    def save_electricity_record(self, period_id, results):
+        """
+        儲存計費記錄（全部房間的應繳金額）
+        
+        params:
+            period_id: 計費期間 ID
+            results: list of dict，包含每個房間的計費資訊
+                    [
+                        {'房號': '1A', '應繳金額': 2000, ...},
+                        ...
+                    ]
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    for result in results:
+                        room = result.get('房號')
+                        fee = int(result.get('應繳金額', 0))
+                        
+                        cur.execute("""
+                            INSERT INTO electricity_payment(period_id, room_number, calculated_fee, status)
+                            VALUES(%s, %s, %s, '未繳')
+                            ON CONFLICT (period_id, room_number) DO UPDATE SET
+                            calculated_fee=EXCLUDED.calculated_fee, updated_at=NOW()
+                        """, (period_id, room, fee))
+            
+            return True, "✅ 計費記錄已儲存到資料庫"
+        except Exception as e:
+            logger.error(f"Save electricity record error: {e}")
+            return False, f"❌ 儲存失敗: {str(e)}"
+    
+    def get_electricity_payment_record(self, period_id):
+        """
+        取得某個計費期間的繳費紀錄（用於「計費結果」Tab）
+        """
+        try:
+            with self._get_connection() as conn:
+                df = pd.read_sql("""
+                    SELECT 
+                        room_number as '房號',
+                        calculated_fee as '應繳金額',
+                        paid_amount as '已繳金額',
+                        status as '繳費狀態',
+                        payment_date as '繳款日期',
+                        notes as '備註',
+                        updated_at as '更新時間'
+                    FROM electricity_payment 
+                    WHERE period_id = %s 
+                    ORDER BY room_number
+                """, conn, params=(period_id,))
+                return df
+        except Exception as e:
+            logger.error(f"Get electricity payment record error: {e}")
+            return pd.DataFrame()
+    
+    def update_electricity_payment(self, period_id, room_number, status, paid_amount=None, payment_date=None, notes=""):
+        """
+        更新繳費狀態
+        
+        params:
+            period_id: 計費期間 ID
+            room_number: 房號
+            status: '未繳', '已繳', '部分繳'
+            paid_amount: 已繳金額
+            payment_date: 繳款日期 (YYYY-MM-DD)
+            notes: 繳費備註
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE electricity_payment 
+                        SET status=%s, paid_amount=%s, payment_date=%s, notes=%s, updated_at=NOW()
+                        WHERE period_id=%s AND room_number=%s
+                    """, (status, paid_amount or 0, payment_date, notes, period_id, room_number))
+            
+            return True, "✅ 繳費狀態已更新"
+        except Exception as e:
+            logger.error(f"Update electricity payment error: {e}")
+            return False, f"❌ 更新失敗: {str(e)}"
+    
+    def get_electricity_payment_summary(self, period_id):
+        """
+        取得某個計費期間的繳費統計
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # 應收總額
+                    cur.execute("""
+                        SELECT SUM(calculated_fee) FROM electricity_payment WHERE period_id=%s
+                    """, (period_id,))
+                    total_due = cur.fetchone()[0] or 0
+                    
+                    # 已繳總額
+                    cur.execute("""
+                        SELECT SUM(paid_amount) FROM electricity_payment WHERE period_id=%s
+                    """, (period_id,))
+                    total_paid = cur.fetchone()[0] or 0
+                    
+                    # 未繳房間數
+                    cur.execute("""
+                        SELECT COUNT(*) FROM electricity_payment WHERE period_id=%s AND status='未繳'
+                    """, (period_id,))
+                    unpaid_rooms = cur.fetchone()[0] or 0
+                    
+                    # 已繳房間數
+                    cur.execute("""
+                        SELECT COUNT(*) FROM electricity_payment WHERE period_id=%s AND status='已繳'
+                    """, (period_id,))
+                    paid_rooms = cur.fetchone()[0] or 0
+                    
+                    # 部分繳房間數
+                    cur.execute("""
+                        SELECT COUNT(*) FROM electricity_payment WHERE period_id=%s AND status='部分繳'
+                    """, (period_id,))
+                    partial_rooms = cur.fetchone()[0] or 0
+                
+                return {
+                    'total_due': total_due,
+                    'total_paid': total_paid,
+                    'total_balance': total_due - total_paid,
+                    'paid_rooms': paid_rooms,
+                    'unpaid_rooms': unpaid_rooms,
+                    'partial_rooms': partial_rooms,
+                    'collection_rate': (total_paid / total_due * 100) if total_due > 0 else 0
+                }
+        except Exception as e:
+            logger.error(f"Get electricity payment summary error: {e}")
+            return {}
+    
+    # ==========================
     # 支出 (Expenses)
     # ==========================
     
