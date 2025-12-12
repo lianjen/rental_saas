@@ -1,159 +1,166 @@
+# views/dashboard.py
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
-from components.cards import kpi_card, room_status_card, section_header
+from datetime import datetime, date, timedelta
+import time
+from components.cards import display_card, display_room_card
 
-# 常數定義 (也可以移至 config.py)
-ALL_ROOMS = ["1A", "1B", "2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
+ALLROOMS = ["1A", "1B", "2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
 
 def render(db):
-    """
-    渲染儀表板頁面
-    :param db: 資料庫實例
-    """
-    # 1. 數據獲取 (Data Fetching)
+    """首頁 Dashboard"""
+    st.header("📊 租屋系統 - 儀表板")
+
     tenants = db.get_tenants()
     today = date.today()
-    summary = db.get_payment_summary(today.year)
+
+    st.markdown("### 📈 關鍵指標")
+    col1, col2, col3, col4 = st.columns(4)
+
+    occupancy = len(tenants)
+    rate = (occupancy / 12 * 100) if occupancy > 0 else 0
+
+    with col1:
+        display_card("佔用率", f"{occupancy}", "green")
+    with col2:
+        display_card("佔用百分比", f"{rate:.0f}%", "blue")
+    with col3:
+        display_card("空房數", f"{12 - occupancy}", "red")
+    with col4:
+        display_card("總房間數", "12", "orange")
+
+    st.divider()
+
+    st.markdown("### ⚠️ 繳費狀態")
+    col1, col2, col3 = st.columns(3)
+
     overdue = db.get_overdue_payments()
     upcoming = db.get_upcoming_payments(7)
-    
-    # 2. 業務邏輯計算 (Business Logic)
-    occupancy = len(tenants)
-    rate = (occupancy / 12) * 100 if occupancy > 0 else 0
-    vacant = 12 - occupancy
-    
-    # 租約狀態檢查邏輯
-    active_rooms_data = {}
+    summary = db.get_payment_summary(today.year)
+
+    with col1:
+        display_card("逾期未繳", f"{len(overdue)}", "red" if len(overdue) > 0 else "green")
+    with col2:
+        display_card("7天內應繳", f"{len(upcoming)}", "orange" if len(upcoming) > 0 else "green")
+    with col3:
+        display_card("收款率", f"{summary['collection_rate']:.1f}%", "blue")
+
+    st.divider()
+
+    st.markdown("### 🏠 租約到期警示")
+    expiringsoon = []
+    expired = []
+
     if not tenants.empty:
         for _, t in tenants.iterrows():
             try:
-                # 處理可能的日期格式差異
-                lease_end_str = str(t['lease_end'])
-                end_date = datetime.strptime(lease_end_str, "%Y-%m-%d").date()
-                days_left = (end_date - today).days
-                
-                # 決定狀態顏色
-                if days_left < 0:
-                    status = "red"
-                    status_text = f"已過期 {abs(days_left)} 天"
-                elif 0 <= days_left <= 45:
-                    status = "orange"
-                    status_text = f"{days_left} 天後到期"
-                else:
-                    status = "green"
-                    status_text = t.get('payment_method', '月繳')
-                
-                active_rooms_data[t['room_number']] = {
-                    "tenant": t['tenant_name'],
-                    "status": status,
-                    "detail": status_text,
-                    "end_date": lease_end_str
-                }
-            except Exception as e:
-                # 錯誤處理防呆
-                active_rooms_data[t['room_number']] = {
-                    "tenant": t['tenant_name'],
-                    "status": "green",
-                    "detail": "資料異常",
-                    "end_date": ""
-                }
+                enddate = datetime.strptime(str(t['lease_end']), "%Y-%m-%d").date()
+                daysleft = (enddate - today).days
+                if daysleft < 0:
+                    expired.append((t['room_number'], t['tenant_name'], abs(daysleft), t['lease_end']))
+                elif 0 <= daysleft < 45:
+                    expiringsoon.append((t['room_number'], t['tenant_name'], daysleft, t['lease_end']))
+            except:
+                pass
 
-    # 3. UI 渲染 (Rendering)
-    
-    # 第一區塊：核心指標
-    section_header("營運概況", "Real-time Operational Metrics")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        kpi_card("已出租房數", f"{occupancy} / 12", "green", "👥")
-    with col2:
-        kpi_card("出租率", f"{rate:.0f}%", "blue", "📈")
-    with col3:
-        kpi_card("空房數量", f"{vacant}", "red" if vacant > 3 else "orange", "🚪")
-    with col4:
-        # 收款率計算
-        collection_rate = summary.get('collection_rate', 0)
-        kpi_card("年度收款率", f"{collection_rate:.1f}%", "blue", "💰")
+    if expired:
+        st.markdown("#### 🚨 已過期租約")
+        cols = st.columns(4)
+        for i, (room, name, days, enddate) in enumerate(expired):
+            with cols[i % 4]:
+                st.error(f"**{room}** - {name}\n已逾期 {days} 天\n({enddate})")
 
-    # 第二區塊：財務警示
-    section_header("待辦事項與警示", "Action Items & Alerts")
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        color = "red" if len(overdue) > 0 else "green"
-        kpi_card("逾期未繳", f"{len(overdue)} 筆", color, "⚠️")
-    with c2:
-        kpi_card("七日內到期", f"{len(upcoming)} 筆", "orange", "📅")
-    with c3:
-        # 計算即將到期租約 (45天內)
-        expiring_count = len([r for r in active_rooms_data.values() if r['status'] == 'orange'])
-        kpi_card("租約即將到期", f"{expiring_count} 間", "orange" if expiring_count > 0 else "green", "📝")
+    if expiringsoon:
+        st.markdown("#### ⏰ 45 天內到期")
+        cols = st.columns(4)
+        for i, (room, name, days, enddate) in enumerate(expiringsoon):
+            with cols[i % 4]:
+                st.warning(f"**{room}** - {name}\n{days} 天後到期\n({enddate})")
 
-    # 第三區塊：房間矩陣
-    section_header("房間即時狀態", "Room Status Matrix")
-    
-    # 使用 Grid 佈局 (6欄)
-    cols = st.columns(6)
-    for i, room in enumerate(ALL_ROOMS):
-        with cols[i % 6]:
-            if room in active_rooms_data:
-                data = active_rooms_data[room]
-                room_status_card(
-                    room_number=room,
-                    status_type=data['status'],
-                    tenant_name=data['tenant'],
-                    detail_text=data['detail']
-                )
-            else:
-                room_status_card(
-                    room_number=room,
-                    status_type="gray",
-                    tenant_name="空房",
-                    detail_text="可立即出租"
-                )
+    if not expired and not expiringsoon:
+        st.info("✅ 所有租約都正常")
 
-    # 第四區塊：年度租金矩陣
-    section_header("年度租金繳費概覽", "Yearly Payment Matrix")
-    
-    # 年份選擇器優化
-    col_sel, col_empty = st.columns([1, 3])
-    with col_sel:
-        year = st.selectbox("選擇年份", [today.year, today.year - 1], key="dash_year_select")
-    
-    rent_matrix = db.get_rent_matrix(year)
-    if not rent_matrix.empty:
-        # 這裡可以進一步優化 DataFrame 的顯示樣式，目前先保持原生但乾淨
-        st.dataframe(
-            rent_matrix, 
-            use_container_width=True,
-            column_config={
-                col: st.column_config.TextColumn(width="small") for col in rent_matrix.columns
-            }
-        )
-    else:
-        st.info("📌 該年度暫無租金資訊")
-    
-    # 底部備忘與未繳
     st.divider()
-    col_memo, col_unpaid = st.columns([1, 1])
-    
-    with col_memo:
-        st.subheader("📝 待辦備忘")
+
+    st.markdown("### 🏘️ 房間狀態")
+    if not tenants.empty:
+        activerooms = tenants.set_index('room_number')
+        cols = st.columns(6)
+
+        for i, room in enumerate(ALLROOMS):
+            with cols[i % 6]:
+                if not activerooms.empty and room in activerooms.index:
+                    t = activerooms.loc[room]
+                    try:
+                        days = (datetime.strptime(str(t['lease_end']), "%Y-%m-%d").date() - today).days
+                        if days < 0:
+                            statuscolor, statustext = "red", f"{abs(days)} 天已逾期"
+                        elif days < 45:
+                            statuscolor, statustext = "orange", t['tenant_name']
+                        else:
+                            statuscolor, statustext = "green", t['tenant_name']
+                        detailtext = t.get('payment_method', '')
+                    except:
+                        statuscolor, statustext, detailtext = "green", t['tenant_name'], t.get('payment_method', '')
+
+                    display_room_card(room, statuscolor, statustext, detailtext)
+                else:
+                    display_room_card(room, "gray", "空房", "")
+    else:
+        st.info("📭 目前沒有房客資訊")
+
+    st.divider()
+
+    st.markdown("### 📅 租金矩陣")
+    year = st.selectbox("選擇年份", [today.year, today.year - 1], key="dash_year")
+
+    rentmatrix = db.get_rent_matrix(year)
+    if not rentmatrix.empty:
+        st.dataframe(rentmatrix, use_container_width=True)
+    else:
+        st.info("🔍 該年度沒有租金記錄")
+
+    st.divider()
+
+    st.markdown("### 📝 備忘錄與未繳租金")
+    colmemo, colunpaid = st.columns([1, 1])
+
+    # ===== 備忘錄區塊（✨ 新增功能）=====
+    with colmemo:
+        st.markdown("#### 📝 代辦備忘錄")
         memos = db.get_memos(completed=False)
+
         if not memos.empty:
             for _, memo in memos.iterrows():
-                # 使用簡單的 checkbox 來處理
-                if st.checkbox(f"{memo['memo_text']}", key=f"memo_{memo['id']}"):
+                c1, c2 = st.columns([5, 1])
+                c1.write(f"• {memo['memo_text']}")
+                if c2.button("✅", key=f"m{memo['id']}"):
                     db.complete_memo(memo['id'])
                     st.rerun()
         else:
-            st.caption("目前無待辦事項")
-            
-    with col_unpaid:
-        st.subheader("🧾 未繳租金明細")
-        unpaid_df = db.get_unpaid_rents()
-        if not unpaid_df.empty:
-            st.dataframe(unpaid_df, use_container_width=True, hide_index=True)
+            st.caption("目前沒有待辦事項 ✅")
+
+        # ✨ 新增：輸入新備忘錄功能
+        st.markdown("---")
+        with st.form("new_memo"):
+            new_memo_text = st.text_input(
+                "📝 新增待辦",
+                placeholder="例如：清洗冷氣 4A、檢查熱水器..."
+            )
+            if st.form_submit_button("➕ 新增", use_container_width=True):
+                if new_memo_text.strip():
+                    db.add_memo(new_memo_text)
+                    st.toast("✅ 已新增待辦事項", icon="📝")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ 請輸入待辦內容")
+
+    # ===== 未繳租金區塊 =====
+    with colunpaid:
+        st.markdown("#### 💰 未繳租金")
+        unpaid = db.get_unpaid_rents()
+        if not unpaid.empty:
+            st.dataframe(unpaid, use_container_width=True, hide_index=True)
         else:
-            st.success("✅ 所有租金皆已繳清")
+            st.caption("所有租金已收齊 ✅")
