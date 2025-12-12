@@ -3,6 +3,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 import time
+import sys
+from pathlib import Path
+
+# 修正 import 路徑
+sys.path.append(str(Path(__file__).parent.parent))
 from components.cards import display_card, display_room_card
 
 ALLROOMS = ["1A", "1B", "2A", "2B", "3A", "3B", "3C", "3D", "4A", "4B", "4C", "4D"]
