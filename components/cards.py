@@ -51,3 +51,31 @@ def display_room_card(room, statuscolor, statustext, detailtext):
         """,
         unsafe_allow_html=True,
     )
+
+
+def section_header(title: str, icon: str = "📋"):
+    """顯示區塊標題"""
+    st.markdown(f"### {icon} {title}")
+
+
+def info_box(title: str, content: str, box_type: str = "info"):
+    """顯示資訊框"""
+    if box_type == "info":
+        st.info(f"**{title}** - {content}")
+    elif box_type == "warning":
+        st.warning(f"**{title}** - {content}")
+    elif box_type == "error":
+        st.error(f"**{title}** - {content}")
+    elif box_type == "success":
+        st.success(f"**{title}** - {content}")
+
+
+def metric_row(col_titles: list, col_values: list, col_colors: list = None):
+    """顯示度量指標行"""
+    if col_colors is None:
+        col_colors = ["blue"] * len(col_titles)
+    
+    cols = st.columns(len(col_titles))
+    for col, title, value, color in zip(cols, col_titles, col_values, col_colors):
+        with col:
+            display_card(title, value, color)
