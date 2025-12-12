@@ -1,50 +1,53 @@
+# components/cards.py
 import streamlit as st
 
-def kpi_card(title: str, value: str, color: str = "green", icon: str = ""):
-    """
-    渲染標準的 KPI 指標卡片
-    :param color: green (Sage), red (Terracotta), blue, orange
-    """
-    html_content = f"""
-    <div class="nordic-card border-left-{color}">
-        <div class="card-title">{icon} {title}</div>
-        <div class="card-value text-{color}">{value}</div>
-    </div>
-    """
-    st.markdown(html_content, unsafe_allow_html=True)
 
-def room_status_card(room_number, status_type, tenant_name, detail_text):
-    """
-    渲染房間狀態卡片
-    :param status_type: active, expiring, expired, empty
-    """
-    # 對應 CSS class
-    css_class_map = {
-        "green": "status-active",
-        "orange": "status-expiring",
-        "red": "status-expired",
-        "gray": "status-empty"
+def display_card(title: str, value: str, color: str = "blue"):
+    """顯示 KPI 卡片"""
+    colors = {
+        "blue": "#f0f4f8",
+        "green": "#edf2f0",
+        "orange": "#fdf3e7",
+        "red": "#fbeaea",
     }
-    
-    css_class = css_class_map.get(status_type, "status-empty")
-    
-    html_content = f"""
-    <div class="room-card {css_class}">
-        <div class="room-number">{room_number}</div>
-        <div class="room-tenant">{tenant_name}</div>
-        <div class="room-detail">{detail_text}</div>
-    </div>
-    """
-    st.markdown(html_content, unsafe_allow_html=True)
+    bordercolors = {
+        "blue": "#98c1d9",
+        "green": "#99b898",
+        "orange": "#e0c3a5",
+        "red": "#e5989b",
+    }
+    textcolor = "#4a5568"
+    valuecolor = "#2d3748"
 
-def section_header(title: str, subtitle: str = ""):
-    """
-    渲染自定義標題
-    """
-    st.markdown(f"""
-    <div style="margin-top: 20px; margin-bottom: 15px;">
-        <h3 style="color: #5F8D78; font-weight: 700; margin-bottom: 0;">{title}</h3>
-        <p style="color: #888; font-size: 0.9rem; margin-top: 0;">{subtitle}</p>
-    </div>
-    <hr style="margin-top: 5px; margin-bottom: 25px; border: 0; border-top: 1px solid #EEE;">
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="background: {colors.get(color, colors['blue'])}; border-radius: 10px; padding: 16px; margin-bottom: 12px; border: 1px solid {bordercolors.get(color, bordercolors['blue'])}; border-left: 5px solid {bordercolors.get(color, bordercolors['blue'])}; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+            <div style="color: {textcolor}; font-size: 0.9rem; font-weight: 600; letter-spacing: 0.5px;">{title}</div>
+            <div style="color: {valuecolor}; font-size: 1.6rem; font-weight: 700; margin-top: 6px; font-family: Segoe UI, sans-serif;">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def display_room_card(room, statuscolor, statustext, detailtext):
+    """顯示房間卡片"""
+    bgcolor = {"green": "#eaf4e7", "red": "#fae3e3", "orange": "#fef5e6"}.get(
+        statuscolor, "#f8f9fa"
+    )
+    textcolor = {
+        "green": "#2f5d34",
+        "red": "#8a2c2c",
+        "orange": "#8a5a2c",
+    }.get(statuscolor, "#4a5568")
+
+    st.markdown(
+        f"""
+        <div style="background-color: {bgcolor}; border-radius: 12px; padding: 12px; text-align: center; height: 100px; display: flex; flex-direction: column; justify-content: center; align-items: center; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="font-size: 1.3rem; font-weight: 700; color: {textcolor};">{room}</div>
+            <div style="font-size: 0.9rem; font-weight: 600; color: {textcolor}; margin-top: 4px;">{statustext}</div>
+            <div style="font-size: 0.75rem; color: {textcolor}; opacity: 0.8;">{detailtext}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
